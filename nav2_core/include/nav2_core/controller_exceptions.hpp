@@ -14,6 +14,7 @@
 #ifndef NAV2_CORE__CONTROLLER_EXCEPTIONS_HPP_
 #define NAV2_CORE__CONTROLLER_EXCEPTIONS_HPP_
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -74,6 +75,22 @@ class ControllerTimedOut : public ControllerException
 public:
   explicit ControllerTimedOut(const std::string & description)
   : ControllerException(description) {}
+};
+
+/**
+ * @brief Exception carrying the FollowPath result code to report
+ * (one of nav2_msgs::action::FollowPath::Result).
+ */
+class ControllerCodedException : public ControllerException
+{
+public:
+  ControllerCodedException(uint16_t code, const std::string & description)
+  : ControllerException(description), code_(code) {}
+
+  uint16_t code() const {return code_;}
+
+private:
+  uint16_t code_;
 };
 
 }  // namespace nav2_core

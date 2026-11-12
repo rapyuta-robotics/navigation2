@@ -646,6 +646,14 @@ void ControllerServer::computeControl()
     result->error_msg = e.what();
     action_server_->terminate_current(result);
     return;
+  } catch (nav2_core::ControllerCodedException & e) {
+    RCLCPP_ERROR(this->get_logger(), "%s", e.what());
+    onGoalExit(true);
+    std::shared_ptr<Action::Result> result = std::make_shared<Action::Result>();
+    result->error_code = e.code();
+    result->error_msg = e.what();
+    action_server_->terminate_current(result);
+    return;
   } catch (nav2_core::ControllerException & e) {
     RCLCPP_ERROR(this->get_logger(), "%s", e.what());
     onGoalExit(true);
