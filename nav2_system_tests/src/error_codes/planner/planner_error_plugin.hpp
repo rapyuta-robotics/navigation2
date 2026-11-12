@@ -29,6 +29,7 @@
 #include "nav2_ros_common/lifecycle_node.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_core/planner_exceptions.hpp"
+#include "nav2_msgs/action/compute_path_to_pose.hpp"
 #include "nav2_ros_common/tf2_factories.hpp"
 
 namespace nav2_system_tests
@@ -155,6 +156,19 @@ class NoViapointsGivenErrorPlanner : public UnknownErrorPlanner
     std::function<bool()>) override
   {
     throw nav2_core::NoViapointsGiven("No Via points given");
+  }
+};
+
+class CodedInvalidStartErrorPlanner : public UnknownErrorPlanner
+{
+  nav_msgs::msg::Path createPlan(
+    const geometry_msgs::msg::PoseStamped &,
+    const geometry_msgs::msg::PoseStamped &,
+    const std::vector<geometry_msgs::msg::PoseStamped> &,
+    std::function<bool()>) override
+  {
+    throw nav2_core::PlannerCodedException(
+            nav2_msgs::action::ComputePathToPose::Result::INVALID_START, "Invalid start");
   }
 };
 

@@ -43,4 +43,8 @@
            base_class_type="nav2_core::GlobalPlanner">
         <description>This global planner produces a cancelled exception.</description>
     </class>
+    <class type="nav2_system_tests::CodedInvalidStartErrorPlanner"
+           base_class_type="nav2_core::GlobalPlanner">
+        <description>This global planner produces a coded invalid start exception.</description>
+    </class>
 </library>

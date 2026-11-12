@@ -631,6 +631,10 @@ PlannerServer::computePlan()
     exceptionWarning(start, goal->goal, goal->planner_id, ex, result->error_msg);
     result->error_code = ActionToPoseResult::TF_ERROR;
     action_server_pose_->terminate_current(result);
+  } catch (nav2_core::PlannerCodedException & ex) {
+    exceptionWarning(start, goal->goal, goal->planner_id, ex, result->error_msg);
+    result->error_code = ex.code();
+    action_server_pose_->terminate_current(result);
   } catch (nav2_core::PlannerCancelled &) {
     result->error_msg = "Goal was canceled. Canceling planning action.";
     RCLCPP_INFO(get_logger(), "%s", result->error_msg.c_str());

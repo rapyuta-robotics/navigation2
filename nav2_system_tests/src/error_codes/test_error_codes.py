@@ -114,6 +114,7 @@ def main(argv=sys.argv[1:]):
         'goal_occupied': ComputePathToPose.Result().GOAL_OCCUPIED,
         'timeout': ComputePathToPose.Result().TIMEOUT,
         'no_valid_path': ComputePathToPose.Result().NO_VALID_PATH,
+        'coded_invalid_start': ComputePathToPose.Result().INVALID_START,
     }
 
     for planner, error_code in compute_path_to_pose.items():
