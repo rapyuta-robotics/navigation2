@@ -21,6 +21,7 @@
 #include "nav2_core/controller.hpp"
 #include "nav2_core/controller_exceptions.hpp"
 #include "nav2_ros_common/tf2_factories.hpp"
+#include "nav2_msgs/action/follow_path.hpp"
 
 namespace nav2_system_tests
 {
@@ -119,6 +120,20 @@ class NoValidControlErrorController : public UnknownErrorController
     const geometry_msgs::msg::PoseStamped &)
   {
     throw nav2_core::NoValidControl("No valid control");
+  }
+};
+
+class CodedCollisionErrorController : public UnknownErrorController
+{
+  virtual geometry_msgs::msg::TwistStamped computeVelocityCommands(
+    const geometry_msgs::msg::PoseStamped &,
+    const geometry_msgs::msg::Twist &,
+    nav2_core::GoalChecker *,
+    const nav_msgs::msg::Path &,
+    const geometry_msgs::msg::PoseStamped &)
+  {
+    throw nav2_core::ControllerCodedException(
+            nav2_msgs::action::FollowPath::Result::COLLISION, "Collision");
   }
 };
 

@@ -23,4 +23,8 @@
            base_class_type="nav2_core::Controller">
         <description>This local planner produces a no valid control exception.</description>
     </class>
+    <class type="nav2_system_tests::CodedCollisionErrorController"
+           base_class_type="nav2_core::Controller">
+        <description>This local planner produces a coded collision exception.</description>
+    </class>
 </library>

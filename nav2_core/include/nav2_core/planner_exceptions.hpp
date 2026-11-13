@@ -36,6 +36,7 @@
 #ifndef NAV2_CORE__PLANNER_EXCEPTIONS_HPP_
 #define NAV2_CORE__PLANNER_EXCEPTIONS_HPP_
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <memory>
@@ -118,6 +119,22 @@ class PlannerCancelled : public PlannerException
 public:
   explicit PlannerCancelled(const std::string & description)
   : PlannerException(description) {}
+};
+
+/**
+ * @brief Exception carrying the ComputePathToPose result code to report
+ * (one of nav2_msgs::action::ComputePathToPose::Result).
+ */
+class PlannerCodedException : public PlannerException
+{
+public:
+  PlannerCodedException(uint16_t code, const std::string & description)
+  : PlannerException(description), code_(code) {}
+
+  uint16_t code() const {return code_;}
+
+private:
+  uint16_t code_;
 };
 
 }  // namespace nav2_core

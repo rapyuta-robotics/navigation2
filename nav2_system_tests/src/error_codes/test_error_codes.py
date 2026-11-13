@@ -67,6 +67,7 @@ def main(argv=sys.argv[1:]):
         'patience_exceeded': FollowPath.Result().PATIENCE_EXCEEDED,
         'failed_to_make_progress': FollowPath.Result().FAILED_TO_MAKE_PROGRESS,
         'no_valid_control': FollowPath.Result().NO_VALID_CONTROL,
+        'coded_collision': FollowPath.Result().COLLISION,
     }
 
     for controller, error_code in follow_path.items():
@@ -113,6 +114,7 @@ def main(argv=sys.argv[1:]):
         'goal_occupied': ComputePathToPose.Result().GOAL_OCCUPIED,
         'timeout': ComputePathToPose.Result().TIMEOUT,
         'no_valid_path': ComputePathToPose.Result().NO_VALID_PATH,
+        'coded_invalid_start': ComputePathToPose.Result().INVALID_START,
     }
 
     for planner, error_code in compute_path_to_pose.items():

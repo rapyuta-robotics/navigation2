@@ -23,3 +23,4 @@ PLUGINLIB_EXPORT_CLASS(
 PLUGINLIB_EXPORT_CLASS(nav2_system_tests::PatienceExceededErrorController, nav2_core::Controller)
 PLUGINLIB_EXPORT_CLASS(nav2_system_tests::InvalidPathErrorController, nav2_core::Controller)
 PLUGINLIB_EXPORT_CLASS(nav2_system_tests::NoValidControlErrorController, nav2_core::Controller)
+PLUGINLIB_EXPORT_CLASS(nav2_system_tests::CodedCollisionErrorController, nav2_core::Controller)

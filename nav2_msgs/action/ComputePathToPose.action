@@ -21,6 +21,11 @@ uint16 START_OCCUPIED=205
 uint16 GOAL_OCCUPIED=206
 uint16 TIMEOUT=207
 uint16 NO_VALID_PATH=208
+# Codes reported by plugins through nav2_core::PlannerCodedException
+uint16 INVALID_START=209
+uint16 INVALID_GOAL=210
+uint16 NOT_INITIALIZED=211
+uint16 INTERNAL_ERROR=212
 
 nav_msgs/Path path
 builtin_interfaces/Duration planning_time

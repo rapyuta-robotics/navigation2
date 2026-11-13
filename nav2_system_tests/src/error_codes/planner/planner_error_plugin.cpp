@@ -25,3 +25,4 @@ PLUGINLIB_EXPORT_CLASS(nav2_system_tests::TimedOutErrorPlanner, nav2_core::Globa
 PLUGINLIB_EXPORT_CLASS(nav2_system_tests::TFErrorPlanner, nav2_core::GlobalPlanner)
 PLUGINLIB_EXPORT_CLASS(nav2_system_tests::NoViapointsGivenErrorPlanner, nav2_core::GlobalPlanner)
 PLUGINLIB_EXPORT_CLASS(nav2_system_tests::CancelledPlanner, nav2_core::GlobalPlanner)
+PLUGINLIB_EXPORT_CLASS(nav2_system_tests::CodedInvalidStartErrorPlanner, nav2_core::GlobalPlanner)
