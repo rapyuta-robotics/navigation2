@@ -34,3 +34,11 @@ nav2_add_test(test_bond
   ENV
     TEST_EXECUTABLE=$<TARGET_FILE:test_bond_gtest>
 )
+
+nav2_add_gtest(test_transition_timeout test_transition_timeout.cpp TIMEOUT 60)
+target_link_libraries(test_transition_timeout
+  ${library_name}
+  ${lifecycle_msgs_TARGETS}
+  ${nav2_msgs_TARGETS}
+  rclcpp::rclcpp
+)
