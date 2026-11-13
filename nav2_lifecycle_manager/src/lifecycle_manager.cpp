@@ -52,6 +52,7 @@ LifecycleManager::LifecycleManager(const rclcpp::NodeOptions & options)
   autostart_ = nav2::declare_or_get_parameter(node, "autostart", false);
   double bond_timeout_s = nav2::declare_or_get_parameter(node, "bond_timeout", 4.0);
   double service_timeout_s = nav2::declare_or_get_parameter(node, "service_timeout", 5.0);
+  double transition_timeout_s = nav2::declare_or_get_parameter(node, "transition_timeout", 0.0);
   double respawn_timeout_s = nav2::declare_or_get_parameter(
     node, "bond_respawn_max_duration", 10.0);
   attempt_respawn_reconnection_ = nav2::declare_or_get_parameter(
@@ -64,6 +65,8 @@ LifecycleManager::LifecycleManager(const rclcpp::NodeOptions & options)
     std::chrono::duration<double>(bond_timeout_s));
   service_timeout_ = std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::duration<double>(service_timeout_s));
+  transition_timeout_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::duration<double>(transition_timeout_s));
   bond_respawn_max_duration_ = rclcpp::Duration::from_seconds(respawn_timeout_s);
 
   callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
@@ -312,9 +315,31 @@ LifecycleManager::changeStateForNode(const std::string & node_name, std::uint8_t
 {
   message(transition_label_map_[transition] + node_name);
 
-  if (!node_map_[node_name]->change_state(
-      transition, std::chrono::milliseconds(-1),
-      service_timeout_) ||
+  bool requested = false;
+  try {
+    requested = node_map_[node_name]->change_state(
+      transition, transition_timeout_ > 0ms ? transition_timeout_ : std::chrono::milliseconds(-1),
+      service_timeout_);
+  } catch (const std::runtime_error & e) {
+    if (transition_timeout_ <= 0ms) {
+      throw;
+    }
+    // The response can be lost although the node made the transition: its state decides
+    RCLCPP_WARN(
+      get_logger(), "No response to %s%s within %.2fs (%s), checking its state",
+      transition_label_map_[transition].c_str(), node_name.c_str(),
+      std::chrono::duration<double>(transition_timeout_).count(), e.what());
+    const auto deadline = std::chrono::steady_clock::now() + transition_timeout_;
+    while (node_map_[node_name]->get_state(service_timeout_) >=
+      State::TRANSITION_STATE_CONFIGURING &&
+      std::chrono::steady_clock::now() < deadline)
+    {
+      std::this_thread::sleep_for(100ms);
+    }
+    requested = true;
+  }
+
+  if (!requested ||
     !(node_map_[node_name]->get_state(service_timeout_) == transition_state_map_[transition]))
   {
     RCLCPP_ERROR(get_logger(), "Failed to change state for node: %s", node_name.c_str());
