@@ -27,6 +27,7 @@ find_package(tf2_sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(point_cloud_transport REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(Boost REQUIRED)
 
 option(ENABLE_OPENMP "Enable OpenMP parallelization" OFF)
 
@@ -69,6 +70,7 @@ target_link_libraries(nav2_costmap_2d_core PUBLIC
   tf2_sensor_msgs::tf2_sensor_msgs
   nav2_ros_common::nav2_ros_common
 )
+target_link_libraries(nav2_costmap_2d_core PRIVATE Boost::headers)
 
 add_library(layers SHARED
   plugins/inflation_layer.cpp
