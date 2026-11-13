@@ -54,6 +54,7 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "nav2_ros_common/tf2_factories.hpp"
 #include "nav2_util/robot_utils.hpp"
+#include "rcl_interfaces/msg/parameter_descriptor.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 
 using namespace std::chrono_literals;
@@ -386,6 +387,11 @@ Costmap2DROS::getParameters()
     "always_send_full_costmap", false);
   map_vis_z_ = declare_or_get_parameter("map_vis_z", 0.0);
   footprint_padding_ = declare_or_get_parameter("footprint_padding", 0.01f);
+  rcl_interfaces::msg::ParameterDescriptor padding_type_descriptor;
+  padding_type_descriptor.read_only = true;
+  padding_type_descriptor.description = "Footprint padding algorithm: per_axis or polygon_buffer";
+  footprint_padding_type_ = declare_or_get_parameter(
+    "footprint_padding_type", std::string("per_axis"), padding_type_descriptor);
   footprint_ = declare_or_get_parameter(
     "footprint", std::string("[]"));
   global_frame_ = declare_or_get_parameter(
@@ -466,6 +472,12 @@ Costmap2DROS::getParameters()
     }
   }
 
+  if (footprint_padding_type_ != "per_axis" && footprint_padding_type_ != "polygon_buffer") {
+    throw std::invalid_argument(
+            "footprint_padding_type must be per_axis or polygon_buffer, not " +
+            footprint_padding_type_);
+  }
+
   // 4. The width, height, and resolution of map cannot be negative or 0
   // (to avoid abnormal memory usage)
   if (map_width_meters_ <= 0) {
@@ -501,7 +513,7 @@ Costmap2DROS::setRobotFootprint(const std::vector<geometry_msgs::msg::Point> & p
     return;
   }
   auto padded = std::make_shared<std::vector<geometry_msgs::msg::Point>>(points);
-  padFootprint(*padded, footprint_padding_);
+  padFootprint(*padded, footprint_padding_, footprint_padding_type_);
 
 #ifdef __cpp_lib_atomic_shared_ptr
   unpadded_footprint_.store(std::make_shared<std::vector<geometry_msgs::msg::Point>>(points));
@@ -877,12 +889,12 @@ Costmap2DROS::updateParametersCallback(const std::vector<rclcpp::Parameter> & pa
 #ifdef __cpp_lib_atomic_shared_ptr
         auto padded = std::make_shared<std::vector<geometry_msgs::msg::Point>>(
           *unpadded_footprint_.load());
-        padFootprint(*padded, footprint_padding_);
+        padFootprint(*padded, footprint_padding_, footprint_padding_type_);
         padded_footprint_.store(padded);
 #else
         auto padded = std::make_shared<std::vector<geometry_msgs::msg::Point>>(
           *std::atomic_load(&unpadded_footprint_));
-        padFootprint(*padded, footprint_padding_);
+        padFootprint(*padded, footprint_padding_, footprint_padding_type_);
         std::atomic_store(&padded_footprint_, padded);
 #endif
         layered_costmap_->setFootprint(*padded);
