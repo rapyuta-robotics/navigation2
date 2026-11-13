@@ -33,9 +33,18 @@
 #include <string>
 #include <vector>
 
+// Boost.Geometry's buffer code trips -Wnull-dereference inside its own headers (false positive)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#include "boost/geometry.hpp"
+#include "boost/geometry/geometries/point_xy.hpp"
+#include "boost/geometry/geometries/polygon.hpp"
+#include "boost/geometry/strategies/buffer.hpp"
+#pragma GCC diagnostic pop
 #include "geometry_msgs/msg/point32.hpp"
 #include "nav2_util/array_parser.hpp"
 #include "nav2_costmap_2d/costmap_math.hpp"
+#include "rclcpp/logging.hpp"
 
 namespace nav2_costmap_2d
 {
@@ -151,6 +160,104 @@ void padFootprint(std::vector<geometry_msgs::msg::Point> & footprint, double pad
     geometry_msgs::msg::Point & pt = footprint[i];
     pt.x += sign0(pt.x) * padding;
     pt.y += sign0(pt.y) * padding;
+  }
+}
+
+namespace
+{
+namespace bg = boost::geometry;
+using BoostPoint = bg::model::d2::point_xy<double>;
+using BoostPolygon = bg::model::polygon<BoostPoint>;
+
+BoostPolygon toBoostPolygon(const std::vector<geometry_msgs::msg::Point> & polygon)
+{
+  BoostPolygon boost_poly;
+  for (const auto & pt : polygon) {
+    bg::append(boost_poly.outer(), BoostPoint(pt.x, pt.y));
+  }
+
+  // ensure closure
+  if (polygon.front().x != polygon.back().x || polygon.front().y != polygon.back().y) {
+    bg::append(boost_poly.outer(), BoostPoint(polygon.front().x, polygon.front().y));
+  }
+
+  // correct polygon before validation
+  bg::correct(boost_poly);
+  return boost_poly;
+}
+
+std::vector<geometry_msgs::msg::Point> fromBoostPolygon(const BoostPolygon & polygon)
+{
+  std::vector<geometry_msgs::msg::Point> footprint;
+  for (const auto & pt : polygon.outer()) {
+    geometry_msgs::msg::Point p;
+    p.x = pt.x();
+    p.y = pt.y();
+    p.z = 0.0;
+    footprint.push_back(p);
+  }
+
+  // Remove closing point if same as first
+  if (footprint.size() > 1 && footprint.front().x == footprint.back().x &&
+    footprint.front().y == footprint.back().y)
+  {
+    footprint.pop_back();
+  }
+  return footprint;
+}
+}  // namespace
+
+void padFootprintPolygonBuffer(std::vector<geometry_msgs::msg::Point> & footprint, double padding)
+{
+  const rclcpp::Logger logger = rclcpp::get_logger("nav2_costmap_2d.footprint");
+  if (padding == 0.0) {
+    return;
+  }
+  if (footprint.size() < 3) {
+    RCLCPP_WARN(logger, "Footprint has fewer than 3 points. Skipping padding.");
+    return;
+  }
+  const auto input_poly = toBoostPolygon(footprint);
+
+  std::string reason;
+  if (!bg::is_valid(input_poly, reason)) {
+    RCLCPP_WARN_STREAM(
+      logger,
+        "Input polygon is STILL invalid after correction. Skipping padding. Reason: " << reason);
+    return;
+  }
+
+  bg::model::multi_polygon<BoostPolygon> buffered_result;
+  bg::strategy::buffer::distance_symmetric<double> distance_strategy(padding);
+  bg::strategy::buffer::join_miter join_strategy(5.0);
+  bg::strategy::buffer::end_flat end_strategy;
+  bg::strategy::buffer::point_square circle_strategy;
+  bg::strategy::buffer::side_straight side_strategy;
+
+  bg::buffer(
+    input_poly, buffered_result, distance_strategy, side_strategy, join_strategy, end_strategy,
+    circle_strategy);
+
+  if (buffered_result.empty()) {
+    RCLCPP_WARN(logger, "Buffer operation produced no results. Skipping padding.");
+    return;
+  }
+
+  // simplify to remove collinear points
+  BoostPolygon simplified_poly;
+  bg::simplify(buffered_result.front(), simplified_poly, 1e-6);
+
+  footprint = fromBoostPolygon(simplified_poly);
+}
+
+void padFootprint(
+  std::vector<geometry_msgs::msg::Point> & footprint, double padding,
+  const std::string & padding_type)
+{
+  if (padding_type == "polygon_buffer") {
+    padFootprintPolygonBuffer(footprint, padding);
+  } else {
+    padFootprint(footprint, padding);
   }
 }
 
