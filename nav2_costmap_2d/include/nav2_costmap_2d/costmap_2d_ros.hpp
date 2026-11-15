@@ -400,6 +400,7 @@ protected:
   bool always_send_full_costmap_{false};
   std::string footprint_;
   float footprint_padding_{0};
+  std::string footprint_padding_type_{"per_axis"};  ///< "per_axis" or "polygon_buffer"
   std::string global_frame_;                ///< The global frame for the costmap
   int map_height_meters_{0};
   double map_publish_frequency_{0};

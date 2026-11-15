@@ -114,6 +114,20 @@ void transformFootprint(
 void padFootprint(std::vector<geometry_msgs::msg::Point> & footprint, double padding);
 
 /**
+ * @brief Grows the footprint polygon by the padding distance on every side (in place),
+ * keeping sharp corners (miter joins).
+ */
+void padFootprintPolygonBuffer(std::vector<geometry_msgs::msg::Point> & footprint, double padding);
+
+/**
+ * @brief Pads the footprint (in place) with the algorithm named by padding_type:
+ * "polygon_buffer" (padFootprintPolygonBuffer) or "per_axis" (padFootprint)
+ */
+void padFootprint(
+  std::vector<geometry_msgs::msg::Point> & footprint, double padding,
+  const std::string & padding_type);
+
+/**
  * @brief Create a circular footprint from a given radius
  */
 std::vector<geometry_msgs::msg::Point> makeFootprintFromRadius(double radius);

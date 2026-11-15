@@ -34,8 +34,11 @@
 *
 * Author: Dave Hershberger
 *********************************************************************/
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -195,6 +198,91 @@ TEST_F(TestNode, footprint_from_same_level_param)
   EXPECT_EQ(5.0f, footprint[2].x);
   EXPECT_EQ(6.0f, footprint[2].y);
   EXPECT_EQ(0.0f, footprint[2].z);
+}
+
+namespace
+{
+std::vector<geometry_msgs::msg::Point> makePolygon(
+  const std::vector<std::pair<double, double>> & vertices)
+{
+  std::vector<geometry_msgs::msg::Point> polygon;
+  for (const auto & [x, y] : vertices) {
+    geometry_msgs::msg::Point point;
+    point.x = x;
+    point.y = y;
+    polygon.push_back(point);
+  }
+  return polygon;
+}
+
+struct Bounds
+{
+  double min_x, max_x, min_y, max_y;
+};
+
+Bounds bounds(const std::vector<geometry_msgs::msg::Point> & polygon)
+{
+  Bounds b{polygon[0].x, polygon[0].x, polygon[0].y, polygon[0].y};
+  for (const auto & point : polygon) {
+    b.min_x = std::min(b.min_x, point.x);
+    b.max_x = std::max(b.max_x, point.x);
+    b.min_y = std::min(b.min_y, point.y);
+    b.max_y = std::max(b.max_y, point.y);
+  }
+  return b;
+}
+}  // namespace
+
+TEST(PolygonBufferPadding, grows_every_side_of_a_footprint_off_the_robot_center)
+{
+  // footprint entirely in front of the robot center
+  const auto footprint = makePolygon({{0.2, -0.3}, {1.0, -0.3}, {1.0, 0.3}, {0.2, 0.3}});
+
+  // per_axis moves the rear side forward instead of outward
+  auto per_axis = footprint;
+  nav2_costmap_2d::padFootprint(per_axis, 0.1, "per_axis");
+  EXPECT_NEAR(0.3, bounds(per_axis).min_x, 1e-9);
+
+  auto buffered = footprint;
+  nav2_costmap_2d::padFootprint(buffered, 0.1, "polygon_buffer");
+  ASSERT_EQ(4u, buffered.size());
+  const auto b = bounds(buffered);
+  EXPECT_NEAR(0.1, b.min_x, 1e-9);
+  EXPECT_NEAR(1.1, b.max_x, 1e-9);
+  EXPECT_NEAR(-0.4, b.min_y, 1e-9);
+  EXPECT_NEAR(0.4, b.max_y, 1e-9);
+}
+
+TEST(PolygonBufferPadding, keeps_the_padding_distance_on_diagonal_edges)
+{
+  // per_axis moves each vertex of a diamond along one axis only, so its edges move out by
+  // padding / sqrt(2); polygon_buffer moves every edge out by the padding (vertex at
+  // 1 + padding * sqrt(2))
+  const auto diamond = makePolygon({{1.0, 0.0}, {0.0, 1.0}, {-1.0, 0.0}, {0.0, -1.0}});
+
+  auto per_axis = diamond;
+  nav2_costmap_2d::padFootprint(per_axis, 0.1, "per_axis");
+  EXPECT_NEAR(1.1, bounds(per_axis).max_x, 1e-9);
+
+  auto buffered = diamond;
+  nav2_costmap_2d::padFootprint(buffered, 0.1, "polygon_buffer");
+  ASSERT_EQ(4u, buffered.size());
+  const auto b = bounds(buffered);
+  EXPECT_NEAR(1.0 + 0.1 * std::sqrt(2.0), b.max_x, 1e-9);
+  EXPECT_NEAR(-1.0 - 0.1 * std::sqrt(2.0), b.min_y, 1e-9);
+}
+
+TEST(PolygonBufferPadding, leaves_degenerate_footprints_and_zero_padding_unchanged)
+{
+  const auto segment = makePolygon({{0.0, 0.0}, {1.0, 0.0}});
+  auto padded_segment = segment;
+  nav2_costmap_2d::padFootprintPolygonBuffer(padded_segment, 0.1);
+  EXPECT_EQ(segment, padded_segment);
+
+  const auto square = makePolygon({{1.0, 1.0}, {-1.0, 1.0}, {-1.0, -1.0}, {1.0, -1.0}});
+  auto unpadded_square = square;
+  nav2_costmap_2d::padFootprintPolygonBuffer(unpadded_square, 0.0);
+  EXPECT_EQ(square, unpadded_square);
 }
 
 int main(int argc, char ** argv)
