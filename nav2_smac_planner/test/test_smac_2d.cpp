@@ -20,6 +20,8 @@
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "gtest/gtest.h"
+#include "nav2_core/planner_exceptions.hpp"
+#include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/costmap_subscriber.hpp"
 #include "nav2_smac_planner/a_star.hpp"
@@ -96,6 +98,54 @@ TEST(SmacTest, test_smac_2d) {
   node2D->cleanup();
   node2D.reset();
   costmap_ros.reset();
+}
+
+TEST(SmacTest, test_smac_2d_request_tolerance) {
+  nav2::LifecycleNode::SharedPtr node2D =
+    std::make_shared<nav2::LifecycleNode>("Smac2DToleranceTest");
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros =
+    std::make_shared<nav2_costmap_2d::Costmap2DROS>("global_costmap");
+  costmap_ros->on_configure(rclcpp_lifecycle::State());
+  node2D->declare_parameter("test.tolerance", 0.0);
+  node2D->configure();
+  node2D->activate();
+
+  auto planner_2d = std::make_unique<nav2_smac_planner::SmacPlanner2D>();
+  planner_2d->configure(node2D, "test", nullptr, costmap_ros);
+  planner_2d->activate();
+
+  geometry_msgs::msg::PoseStamped start, goal;
+  start.pose.position.x = 0.5;
+  start.pose.position.y = 0.5;
+  start.pose.orientation.w = 1.0;
+  goal.pose.position.x = 2.5;
+  goal.pose.position.y = 0.5;
+  goal.pose.orientation.w = 1.0;
+  auto * costmap = costmap_ros->getCostmap();
+  unsigned int mx, my;
+  ASSERT_TRUE(costmap->worldToMap(goal.pose.position.x, goal.pose.position.y, mx, my));
+  costmap->setCost(mx, my, nav2_costmap_2d::LETHAL_OBSTACLE);
+  auto never = []() {return false;};
+
+  // the configured tolerance 0 cannot reach a lethal goal cell
+  EXPECT_THROW(planner_2d->createPlan(start, goal, {}, never), nav2_core::GoalOccupied);
+
+  // the request tolerance reaches a free cell next to it, for this plan only
+  nav_msgs::msg::Path plan = planner_2d->createPlan(start, goal, {}, never, 0.5);
+  ASSERT_FALSE(plan.poses.empty());
+  EXPECT_LE(
+    std::hypot(
+      plan.poses.back().pose.position.x - goal.pose.position.x,
+      plan.poses.back().pose.position.y - goal.pose.position.y), 0.5);
+  EXPECT_THROW(planner_2d->createPlan(start, goal, {}, never), nav2_core::GoalOccupied);
+  EXPECT_EQ(node2D->get_parameter("test.tolerance").as_double(), 0.0);
+
+  planner_2d->deactivate();
+  planner_2d->cleanup();
+  planner_2d.reset();
+  costmap_ros->on_cleanup(rclcpp_lifecycle::State());
+  node2D->deactivate();
+  node2D->cleanup();
 }
 
 TEST(SmacTest, test_smac_2d_reconfigure) {

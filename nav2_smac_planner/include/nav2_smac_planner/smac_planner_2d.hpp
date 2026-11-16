@@ -16,6 +16,7 @@
 #define NAV2_SMAC_PLANNER__SMAC_PLANNER_2D_HPP_
 
 #include <memory>
+#include <optional>
 #include <vector>
 #include <string>
 #include <mutex>
@@ -98,7 +99,32 @@ public:
     const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
     std::function<bool()> cancel_checker) override;
 
+  /**
+   * @brief Creating a plan from start and goal poses with the goal tolerance of this request
+   * @param start Start pose
+   * @param goal Goal pose
+   * @param cancel_checker Function to check if the action has been canceled
+   * @param tolerance Goal tolerance [m], used instead of the tolerance parameter for this plan
+   * @return nav2_msgs::Path of the generated path
+   */
+  nav_msgs::msg::Path createPlan(
+    const geometry_msgs::msg::PoseStamped & start,
+    const geometry_msgs::msg::PoseStamped & goal,
+    const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
+    std::function<bool()> cancel_checker,
+    double tolerance) override;
+
 protected:
+  /**
+   * @brief Plans with the goal tolerance @p tolerance, or the tolerance parameter if empty
+   */
+  nav_msgs::msg::Path computePlan(
+    const geometry_msgs::msg::PoseStamped & start,
+    const geometry_msgs::msg::PoseStamped & goal,
+    const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
+    std::function<bool()> cancel_checker,
+    std::optional<float> tolerance);
+
   /**
    * @brief Validate incoming parameter updates before applying them.
    * This callback is triggered when one or more parameters are about to be updated.
