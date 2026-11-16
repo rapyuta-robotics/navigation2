@@ -4,6 +4,9 @@ geometry_msgs/PoseStamped start
 geometry_msgs/PoseStamped[] viapoints
 string planner_id
 bool use_start # If false, use current robot pose as path start, if true, use start above instead
+# If true, the planner uses tolerance for this request instead of its configured one
+bool tolerance_from_action
+float32 tolerance  # [m]
 ---
 #result definition
 

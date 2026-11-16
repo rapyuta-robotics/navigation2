@@ -4,6 +4,10 @@ string controller_id
 string goal_checker_id
 string progress_checker_id
 string path_handler_id
+# If true, the goal checker uses dist_tolerance and angle_tolerance for this goal instead of its configured ones
+bool tolerance_from_action
+float32 dist_tolerance  # [m]
+float32 angle_tolerance  # [rad]
 ---
 # result definition
 
