@@ -121,6 +121,17 @@ public:
     const geometry_msgs::msg::Pose & goal_pose,
     const geometry_msgs::msg::Twist & velocity,
     const nav_msgs::msg::Path & transformed_global_plan) = 0;
+
+  /**
+   * @brief Use the given tolerances instead of the configured ones until the next reset()
+   * @param xy_tolerance Position tolerance [m]
+   * @param yaw_tolerance Yaw tolerance [rad]
+   * @return False if the goal checker does not take goal tolerances or a value is invalid
+   */
+  virtual bool setTolerances(double /*xy_tolerance*/, double /*yaw_tolerance*/)
+  {
+    return false;
+  }
 };
 
 }  // namespace nav2_core
