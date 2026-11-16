@@ -18,6 +18,7 @@
 #include <chrono>
 #include <string>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <unordered_map>
 #include <mutex>
@@ -70,6 +71,7 @@ public:
    * @param goal goal request
    * @param planner_id The planner to plan with
    * @param cancel_checker A function to check if the action has been canceled
+   * @param tolerance Goal tolerance for this request; the planner's configured one if empty
    * @return Path
    */
   nav_msgs::msg::Path getPlan(
@@ -77,7 +79,8 @@ public:
     const geometry_msgs::msg::PoseStamped & goal,
     const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
     const std::string & planner_id,
-    std::function<bool()> cancel_checker);
+    std::function<bool()> cancel_checker,
+    std::optional<double> tolerance = std::nullopt);
 
 protected:
   /**
