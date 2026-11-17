@@ -28,11 +28,7 @@ uint16 GOAL_OCCUPIED=206
 uint16 TIMEOUT=207
 uint16 NO_VALID_PATH=208
 # uint16 NO_VIAPOINTS_GIVEN=209  # Reserved, only used by ComputePathThroughPoses (309)
-# Codes thrown by RR planners
-uint16 INVALID_START=210
-uint16 INVALID_GOAL=211
-uint16 NOT_INITIALIZED=212
-uint16 INTERNAL_ERROR=213
+uint16 CUSTOM_ERRORS=10200
 
 nav_msgs/Path path
 builtin_interfaces/Duration planning_time
