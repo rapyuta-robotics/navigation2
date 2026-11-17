@@ -126,7 +126,7 @@ bool SimpleGoalChecker::setTolerances(double xy_tolerance, double yaw_tolerance)
     return false;
   }
   std::lock_guard<std::mutex> lock_reinit(mutex_);
-  goal_tolerances_ = std::make_pair(xy_tolerance, yaw_tolerance);
+  goal_tolerances_ = GoalTolerances{xy_tolerance, yaw_tolerance};
   return true;
 }
 
@@ -142,7 +142,7 @@ bool SimpleGoalChecker::isGoalReached(
 
   double query_yaw = tf2::getYaw(query_pose.orientation);
   double goal_yaw = tf2::getYaw(goal_pose.orientation);
-  const double yaw_tolerance = goal_tolerances_ ? goal_tolerances_->second : yaw_goal_tolerance_;
+  const double yaw_tolerance = goal_tolerances_ ? goal_tolerances_->yaw : yaw_goal_tolerance_;
   if (symmetric_yaw_tolerance_) {
     // For symmetric robots: accept either goal orientation or goal + 180°
     double dyaw_forward = angles::shortest_angular_distance(query_yaw, goal_yaw);
@@ -173,9 +173,9 @@ bool SimpleGoalChecker::isGoalXYReached(
   double xy_tolerance_sq = xy_goal_tolerance_sq_;
   double xy_tolerance_reset_sq = xy_goal_tolerance_reset_sq_;
   if (goal_tolerances_) {
-    xy_tolerance_sq = goal_tolerances_->first * goal_tolerances_->first;
-    xy_tolerance_reset_sq = (goal_tolerances_->first + xy_goal_tolerance_buffer_) *
-      (goal_tolerances_->first + xy_goal_tolerance_buffer_);
+    xy_tolerance_sq = goal_tolerances_->xy * goal_tolerances_->xy;
+    xy_tolerance_reset_sq = (goal_tolerances_->xy + xy_goal_tolerance_buffer_) *
+      (goal_tolerances_->xy + xy_goal_tolerance_buffer_);
   }
   if (check_xy_) {
     double dx = query_pose.position.x - goal_pose.position.x,
@@ -210,8 +210,8 @@ bool SimpleGoalChecker::getTolerances(
   std::lock_guard<std::mutex> lock_reinit(mutex_);
   double invalid_field = std::numeric_limits<double>::lowest();
 
-  const double xy_tolerance = goal_tolerances_ ? goal_tolerances_->first : xy_goal_tolerance_;
-  const double yaw_tolerance = goal_tolerances_ ? goal_tolerances_->second : yaw_goal_tolerance_;
+  const double xy_tolerance = goal_tolerances_ ? goal_tolerances_->xy : xy_goal_tolerance_;
+  const double yaw_tolerance = goal_tolerances_ ? goal_tolerances_->yaw : yaw_goal_tolerance_;
   pose_tolerance.position.x = xy_tolerance;
   pose_tolerance.position.y = xy_tolerance;
   pose_tolerance.position.z = invalid_field;
