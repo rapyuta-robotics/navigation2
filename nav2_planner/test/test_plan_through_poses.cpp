@@ -12,7 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License. Reserved.
 
+#include <functional>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "rclcpp/executors/single_threaded_executor.hpp"
@@ -28,6 +33,7 @@
 #include "nav2_ros_common/lifecycle_node.hpp"
 #include "nav2_planner/planner_server.hpp"
 #include "nav2_msgs/action/compute_path_through_poses.hpp"
+#include "nav2_msgs/action/compute_path_to_pose.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/costmap_subscriber.hpp"
 #include "nav2_ros_common/tf2_factories.hpp"
@@ -45,6 +51,53 @@ static const int COSTMAP_WIDTH_METERS{1};
 static const double COSTMAP_RESOLUTION{0.1};
 static const std::vector<std::string> COSTMAP_PLUGINS{"static_layer"};
 static const char COSTMAP_LAYER_NAME[]{"nav2_costmap_2d::StaticLayer"};
+
+/// Planner returning a straight path, without a goal tolerance per request
+class StraightPlanner : public nav2_core::GlobalPlanner
+{
+public:
+  using nav2_core::GlobalPlanner::createPlan;
+
+  void configure(
+    const nav2::LifecycleNode::WeakPtr &, std::string, nav2::TransformBuffer::SharedPtr,
+    std::shared_ptr<nav2_costmap_2d::Costmap2DROS>) override {}
+  void cleanup() override {}
+  void activate() override {}
+  void deactivate() override {}
+
+  nav_msgs::msg::Path createPlan(
+    const geometry_msgs::msg::PoseStamped & start,
+    const geometry_msgs::msg::PoseStamped & goal,
+    const std::vector<geometry_msgs::msg::PoseStamped> &,
+    std::function<bool()>) override
+  {
+    nav_msgs::msg::Path path;
+    path.header = start.header;
+    path.poses = {start, goal};
+    return path;
+  }
+};
+
+/// Straight planner recording the goal tolerance of the request
+class TolerancePlanner : public StraightPlanner
+{
+public:
+  using StraightPlanner::createPlan;
+
+  nav_msgs::msg::Path createPlan(
+    const geometry_msgs::msg::PoseStamped & start,
+    const geometry_msgs::msg::PoseStamped & goal,
+    const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
+    std::function<bool()> cancel_checker,
+    double tolerance) override
+  {
+    received_tolerance = tolerance;
+    return createPlan(start, goal, viapoints, cancel_checker);
+  }
+
+  /// Tolerance of the last request with one, if any
+  std::optional<double> received_tolerance;
+};
 
 class PlannerServerWrapper : public nav2_planner::PlannerServer
 {
@@ -75,6 +128,11 @@ public:
   nav2_costmap_2d::Costmap2D * getCostmap()
   {
     return costmap_ros_->getCostmap();
+  }
+
+  void setPlanner(const std::string & id, nav2_core::GlobalPlanner::Ptr planner)
+  {
+    planners_[id] = planner;
   }
 };
 
@@ -640,6 +698,75 @@ TEST_F(Tester, testPreemptUsesPendingGoal)
     result.result->path.poses.back().pose.position.y,
     new_end.position.y, PLANNER_TOLERANCE);
 
+  planner_->stop();
+  stopTesterNode();
+}
+
+TEST_F(Tester, testComputePathToPoseGoalTolerance)
+{
+  using namespace std::chrono_literals;
+  using ToPose = nav2_msgs::action::ComputePathToPose;
+
+  setParameters();
+  startTesterNode();
+  planner_->start();
+  publishMap();
+
+  auto client = tester_node_->create_action_client<ToPose>("compute_path_to_pose");
+  ASSERT_TRUE(client->wait_for_action_server(2s));
+
+  const auto send = [&](const ToPose::Goal & request) {
+      auto gh_future = client->async_send_goal(request);
+      EXPECT_EQ(gh_future.wait_for(2s), std::future_status::ready);
+      auto result_future = client->async_get_result(gh_future.get());
+      EXPECT_EQ(result_future.wait_for(5s), std::future_status::ready);
+      return result_future.get();
+    };
+
+  ToPose::Goal goal;
+  goal.start.header.frame_id = "map";
+  goal.start.pose.position.x = 0.5;
+  goal.start.pose.position.y = 0.1;
+  goal.start.pose.orientation.w = 1.0;
+  goal.goal = goal.start;
+  goal.goal.pose.position.y = 0.9;
+  goal.planner_id = PLANNER_PLUGINS.front();
+  goal.use_start = true;
+  goal.tolerance_from_action = true;
+  goal.tolerance = 0.25f;
+
+  // A planner without a goal tolerance per request refuses it
+  planner_->setPlanner(PLANNER_PLUGINS.front(), std::make_shared<StraightPlanner>());
+  auto result = send(goal);
+  EXPECT_EQ(result.code, rclcpp_action::ResultCode::ABORTED);
+  EXPECT_EQ(result.result->error_code, ToPose::Result::INVALID_PLANNER);
+
+  auto planner = std::make_shared<TolerancePlanner>();
+  planner_->setPlanner(PLANNER_PLUGINS.front(), planner);
+
+  // Negative and non-finite tolerances fail before planning
+  for (const float tolerance : {-0.1f, std::numeric_limits<float>::quiet_NaN()}) {
+    goal.tolerance = tolerance;
+    result = send(goal);
+    EXPECT_EQ(result.code, rclcpp_action::ResultCode::ABORTED);
+    EXPECT_EQ(result.result->error_code, ToPose::Result::UNKNOWN);
+    EXPECT_FALSE(planner->received_tolerance.has_value());
+  }
+
+  // Without tolerance_from_action the planner plans with its configured tolerance
+  goal.tolerance_from_action = false;
+  result = send(goal);
+  EXPECT_EQ(result.code, rclcpp_action::ResultCode::SUCCEEDED);
+  EXPECT_FALSE(planner->received_tolerance.has_value());
+
+  goal.tolerance_from_action = true;
+  goal.tolerance = 0.25f;
+  result = send(goal);
+  EXPECT_EQ(result.code, rclcpp_action::ResultCode::SUCCEEDED);
+  ASSERT_TRUE(planner->received_tolerance.has_value());
+  EXPECT_DOUBLE_EQ(*planner->received_tolerance, 0.25);
+
+  client.reset();
   planner_->stop();
   stopTesterNode();
 }
