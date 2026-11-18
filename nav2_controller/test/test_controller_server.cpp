@@ -32,6 +32,9 @@
 #include "rclcpp/utilities.hpp"
 #include "nav2_ros_common/tf2_factories.hpp"
 
+#include "nav2_controller/plugins/position_goal_checker.hpp"
+#include "nav2_controller/plugins/simple_goal_checker.hpp"
+
 class ControllerServerShim : public nav2_controller::ControllerServer
 {
 public:
@@ -40,6 +43,14 @@ public:
   void setEndPoseFrame(const std::string & frame) {end_pose_.header.frame_id = frame;}
   void callTransformedPlanAndGoal() {transformedPlanAndGoal();}
   nav2::TransformBuffer & getTfBuffer() {return *costmap_ros_->getTfBuffer();}
+  void selectGoalChecker(const std::string & id, nav2_core::GoalChecker::Ptr checker)
+  {
+    checker->initialize(shared_from_this(), id, costmap_ros_);
+    goal_checkers_[id] = checker;
+    current_goal_checker_ = id;
+  }
+  using nav2_controller::ControllerServer::Action;
+  void callApplyGoalTolerances(const Action::Goal & goal) {applyGoalTolerances(goal);}
 };
 
 TEST(ControllerServerTest, TransformedPlanAndGoalThrowsOnTfFailure)
@@ -68,6 +79,70 @@ TEST(ControllerServerTest, TransformedPlanAndGoalThrowsOnTfFailure)
 
   server->setEndPoseFrame("nonexistent_frame_xyz");
   EXPECT_THROW(server->callTransformedPlanAndGoal(), nav2_core::ControllerTFError);
+  server->cleanup();
+}
+
+/// Server configured without plugins, used to apply FollowPath goal tolerances
+std::shared_ptr<ControllerServerShim> makeConfiguredServer()
+{
+  rclcpp::NodeOptions options;
+  options.parameter_overrides({
+    rclcpp::Parameter("progress_checker_plugins", std::vector<std::string>{}),
+    rclcpp::Parameter("goal_checker_plugins", std::vector<std::string>{}),
+    rclcpp::Parameter("controller_plugins", std::vector<std::string>{}),
+    rclcpp::Parameter("path_handler_plugins", std::vector<std::string>{}),
+    rclcpp::Parameter("plugins", std::vector<std::string>{}),
+    rclcpp::Parameter("filters", std::vector<std::string>{}),
+  });
+  auto server = std::make_shared<ControllerServerShim>(options);
+  EXPECT_EQ(
+    server->configure().id(),
+    lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  return server;
+}
+
+TEST(ControllerServerTest, GoalTolerancesRejectedByGoalChecker)
+{
+  auto server = makeConfiguredServer();
+  server->selectGoalChecker(
+    "position_checker", std::make_shared<nav2_controller::PositionGoalChecker>());
+
+  ControllerServerShim::Action::Goal goal;
+  goal.tolerance_from_action = true;
+  goal.dist_tolerance = 0.1;
+  goal.angle_tolerance = 0.2;
+  try {
+    server->callApplyGoalTolerances(goal);
+    FAIL() << "Goal tolerances were applied to a goal checker that does not take them";
+  } catch (const nav2_core::ControllerException & ex) {
+    EXPECT_EQ(ex.errorCode(), ControllerServerShim::Action::Result::INVALID_CONTROLLER);
+  }
+
+  // Without tolerance_from_action the goal checker keeps its configured tolerances
+  goal.tolerance_from_action = false;
+  EXPECT_NO_THROW(server->callApplyGoalTolerances(goal));
+  server->cleanup();
+}
+
+TEST(ControllerServerTest, GoalTolerancesAppliedToGoalChecker)
+{
+  auto server = makeConfiguredServer();
+  auto checker = std::make_shared<nav2_controller::SimpleGoalChecker>();
+  server->selectGoalChecker("simple_checker", checker);
+
+  ControllerServerShim::Action::Goal goal;
+  goal.tolerance_from_action = true;
+  goal.dist_tolerance = 0.1;
+  goal.angle_tolerance = 0.2;
+  EXPECT_NO_THROW(server->callApplyGoalTolerances(goal));
+
+  geometry_msgs::msg::Pose pose_tolerance;
+  geometry_msgs::msg::Twist vel_tolerance;
+  double path_length_tolerance;
+  ASSERT_TRUE(checker->getTolerances(pose_tolerance, vel_tolerance, path_length_tolerance));
+  EXPECT_NEAR(pose_tolerance.position.x, 0.1, 1e-6);
+  EXPECT_NEAR(
+    2.0 * std::atan2(pose_tolerance.orientation.z, pose_tolerance.orientation.w), 0.2, 1e-6);
   server->cleanup();
 }
 

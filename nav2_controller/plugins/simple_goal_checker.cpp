@@ -32,6 +32,7 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <cmath>
 #include <memory>
 #include <string>
 #include <limits>
@@ -112,7 +113,21 @@ void SimpleGoalChecker::initialize(
 
 void SimpleGoalChecker::reset()
 {
+  std::lock_guard<std::mutex> lock_reinit(mutex_);
   check_xy_ = true;
+  goal_tolerances_.reset();
+}
+
+bool SimpleGoalChecker::setTolerances(double xy_tolerance, double yaw_tolerance)
+{
+  if (!std::isfinite(xy_tolerance) || !std::isfinite(yaw_tolerance) || xy_tolerance < 0.0 ||
+    yaw_tolerance < 0.0)
+  {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock_reinit(mutex_);
+  goal_tolerances_ = GoalTolerances{xy_tolerance, yaw_tolerance};
+  return true;
 }
 
 bool SimpleGoalChecker::isGoalReached(
@@ -127,19 +142,20 @@ bool SimpleGoalChecker::isGoalReached(
 
   double query_yaw = tf2::getYaw(query_pose.orientation);
   double goal_yaw = tf2::getYaw(goal_pose.orientation);
+  const double yaw_tolerance = goal_tolerances_ ? goal_tolerances_->yaw : yaw_goal_tolerance_;
   if (symmetric_yaw_tolerance_) {
     // For symmetric robots: accept either goal orientation or goal + 180°
     double dyaw_forward = angles::shortest_angular_distance(query_yaw, goal_yaw);
     double dyaw_backward = angles::shortest_angular_distance(
       query_yaw, angles::normalize_angle(goal_yaw + M_PI));
 
-    bool forward_match = fabs(dyaw_forward) <= yaw_goal_tolerance_;
-    bool backward_match = fabs(dyaw_backward) <= yaw_goal_tolerance_;
+    bool forward_match = fabs(dyaw_forward) <= yaw_tolerance;
+    bool backward_match = fabs(dyaw_backward) <= yaw_tolerance;
 
     return forward_match || backward_match;
   } else {
     double dyaw = angles::shortest_angular_distance(query_yaw, goal_yaw);
-    return fabs(dyaw) <= yaw_goal_tolerance_;
+    return fabs(dyaw) <= yaw_tolerance;
   }
 }
 
@@ -154,10 +170,17 @@ bool SimpleGoalChecker::isGoalXYReached(
   {
     return false;
   }
+  double xy_tolerance_sq = xy_goal_tolerance_sq_;
+  double xy_tolerance_reset_sq = xy_goal_tolerance_reset_sq_;
+  if (goal_tolerances_) {
+    xy_tolerance_sq = goal_tolerances_->xy * goal_tolerances_->xy;
+    xy_tolerance_reset_sq = (goal_tolerances_->xy + xy_goal_tolerance_buffer_) *
+      (goal_tolerances_->xy + xy_goal_tolerance_buffer_);
+  }
   if (check_xy_) {
     double dx = query_pose.position.x - goal_pose.position.x,
       dy = query_pose.position.y - goal_pose.position.y;
-    if (dx * dx + dy * dy > xy_goal_tolerance_sq_) {
+    if (dx * dx + dy * dy > xy_tolerance_sq) {
       return false;
     }
     // We are within the window
@@ -170,7 +193,7 @@ bool SimpleGoalChecker::isGoalXYReached(
     // check if we have left the buffer region to reset the state
     double dx = query_pose.position.x - goal_pose.position.x,
       dy = query_pose.position.y - goal_pose.position.y;
-    if (dx * dx + dy * dy > xy_goal_tolerance_reset_sq_) {
+    if (dx * dx + dy * dy > xy_tolerance_reset_sq) {
       check_xy_ = true;
       return false;
     }
@@ -187,11 +210,13 @@ bool SimpleGoalChecker::getTolerances(
   std::lock_guard<std::mutex> lock_reinit(mutex_);
   double invalid_field = std::numeric_limits<double>::lowest();
 
-  pose_tolerance.position.x = xy_goal_tolerance_;
-  pose_tolerance.position.y = xy_goal_tolerance_;
+  const double xy_tolerance = goal_tolerances_ ? goal_tolerances_->xy : xy_goal_tolerance_;
+  const double yaw_tolerance = goal_tolerances_ ? goal_tolerances_->yaw : yaw_goal_tolerance_;
+  pose_tolerance.position.x = xy_tolerance;
+  pose_tolerance.position.y = xy_tolerance;
   pose_tolerance.position.z = invalid_field;
   pose_tolerance.orientation =
-    nav2_util::geometry_utils::orientationAroundZAxis(yaw_goal_tolerance_);
+    nav2_util::geometry_utils::orientationAroundZAxis(yaw_tolerance);
 
   vel_tolerance.linear.x = invalid_field;
   vel_tolerance.linear.y = invalid_field;

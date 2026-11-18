@@ -32,6 +32,7 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -44,6 +45,7 @@
 #include "nav2_ros_common/lifecycle_node.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/parameter_client.hpp"
+#include "tf2/utils.hpp"
 
 using nav2_controller::SimpleGoalChecker;
 using nav2_controller::StoppedGoalChecker;
@@ -543,6 +545,53 @@ TEST(SimpleGoalChecker, xy_goal_tolerance_buffer)
   // Since yaw is also within tolerance, the goal is reached.
   current_pose.position.x = xy_goal_tol;
   EXPECT_TRUE(gc.isGoalReached(current_pose, goal_pose, velocity, transformed_global_plan));
+}
+
+TEST(SimpleGoalChecker, goal_tolerances_last_until_reset)
+{
+  auto x = std::make_shared<TestLifecycleNode>("simple_goal_checker_goal_tolerances");
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("test_costmap");
+  x->declare_parameter("test.xy_goal_tolerance", 0.25);
+  x->declare_parameter("test.yaw_goal_tolerance", 0.25);
+  x->declare_parameter("test.stateful", false);
+  SimpleGoalChecker gc;
+  gc.initialize(x, "test", costmap);
+
+  geometry_msgs::msg::Pose goal_pose;
+  geometry_msgs::msg::Pose current_pose;
+  geometry_msgs::msg::Twist velocity;
+  nav_msgs::msg::Path transformed_global_plan;
+  geometry_msgs::msg::Pose pose_tol;
+  geometry_msgs::msg::Twist vel_tol;
+  double path_length_tol;
+
+  // 0.2 m off and 0.2 rad off: reached with the configured tolerances
+  current_pose.position.x = 0.2;
+  current_pose.orientation = nav2_util::geometry_utils::orientationAroundZAxis(0.2);
+  EXPECT_TRUE(gc.isGoalReached(current_pose, goal_pose, velocity, transformed_global_plan));
+
+  // tighter goal tolerances: not reached, and reported by getTolerances
+  EXPECT_TRUE(gc.setTolerances(0.1, 0.3));
+  EXPECT_FALSE(gc.isGoalReached(current_pose, goal_pose, velocity, transformed_global_plan));
+  ASSERT_TRUE(gc.getTolerances(pose_tol, vel_tol, path_length_tol));
+  EXPECT_DOUBLE_EQ(pose_tol.position.x, 0.1);
+  EXPECT_NEAR(tf2::getYaw(pose_tol.orientation), 0.3, 1e-9);
+  current_pose.position.x = 0.05;
+  EXPECT_TRUE(gc.isGoalReached(current_pose, goal_pose, velocity, transformed_global_plan));
+  current_pose.orientation = nav2_util::geometry_utils::orientationAroundZAxis(0.28);
+  EXPECT_TRUE(gc.isGoalReached(current_pose, goal_pose, velocity, transformed_global_plan));
+
+  // invalid values are refused and keep the goal tolerances
+  EXPECT_FALSE(gc.setTolerances(-0.1, 0.3));
+  EXPECT_FALSE(gc.setTolerances(0.1, std::numeric_limits<double>::quiet_NaN()));
+  ASSERT_TRUE(gc.getTolerances(pose_tol, vel_tol, path_length_tol));
+  EXPECT_DOUBLE_EQ(pose_tol.position.x, 0.1);
+
+  // reset (next goal) restores the configured tolerances
+  gc.reset();
+  EXPECT_FALSE(gc.isGoalReached(current_pose, goal_pose, velocity, transformed_global_plan));
+  ASSERT_TRUE(gc.getTolerances(pose_tol, vel_tol, path_length_tol));
+  EXPECT_DOUBLE_EQ(pose_tol.position.x, 0.25);
 }
 
 TEST(PositionGoalChecker, xy_goal_tolerance_buffer)

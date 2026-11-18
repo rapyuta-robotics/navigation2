@@ -36,6 +36,7 @@
 #define NAV2_CONTROLLER__PLUGINS__SIMPLE_GOAL_CHECKER_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -124,6 +125,14 @@ public:
     const geometry_msgs::msg::Twist & velocity,
     const nav_msgs::msg::Path & transformed_global_plan) override;
 
+  /**
+   * @brief Use the given tolerances instead of xy_goal_tolerance and yaw_goal_tolerance until the next reset()
+   * @param xy_tolerance Position tolerance [m], finite and >= 0
+   * @param yaw_tolerance Yaw tolerance [rad], finite and >= 0
+   * @return False if a value is invalid
+   */
+  bool setTolerances(double xy_tolerance, double yaw_tolerance) override;
+
 protected:
   nav2::LifecycleNode::WeakPtr node_;
   rclcpp::Logger logger_{rclcpp::get_logger("simple_goal_checker")};
@@ -132,6 +141,13 @@ protected:
   bool symmetric_yaw_tolerance_;
   // Cached squared xy_goal_tolerance_ and xy_goal_tolerance_reset_
   double xy_goal_tolerance_sq_, xy_goal_tolerance_reset_sq_;
+  // Goal tolerances set by setTolerances, cleared by reset
+  struct GoalTolerances
+  {
+    double xy;  // [m]
+    double yaw;  // [rad]
+  };
+  std::optional<GoalTolerances> goal_tolerances_;
   // Dynamic parameters handler
   std::mutex mutex_;
   rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_set_params_handler_;

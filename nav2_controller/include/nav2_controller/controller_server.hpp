@@ -180,6 +180,13 @@ protected:
   void setPlannerPath(const nav_msgs::msg::Path & path);
 
   /**
+   * @brief Hands the goal's tolerances to the goal checker if the goal sets tolerance_from_action
+   * @param goal FollowPath goal
+   * @throw nav2_core::ControllerException (INVALID_CONTROLLER) if the goal checker does not take them
+   */
+  void applyGoalTolerances(const Action::Goal & goal);
+
+  /**
    * @brief Refreshes transformed_global_plan_ and transformed_end_pose_ for the current cycle
    *
    * @throw nav2_core::ControllerTFError if the robot pose or end pose cannot be obtained

@@ -537,6 +537,7 @@ void ControllerServer::computeControl()
     }
 
     setPlannerPath(goal->path);
+    applyGoalTolerances(*goal);
     if (!current_progress_checker_.empty()) {
       progress_checkers_[current_progress_checker_]->reset();
     }
@@ -631,6 +632,24 @@ void ControllerServer::terminateWithError(uint16_t error_code, const std::string
   result->error_code = error_code;
   result->error_msg = error_msg;
   action_server_->terminate_current(result);
+}
+
+void ControllerServer::applyGoalTolerances(const Action::Goal & goal)
+{
+  if (!goal.tolerance_from_action) {
+    return;
+  }
+  if (!goal_checkers_[current_goal_checker_]->setTolerances(
+      goal.dist_tolerance, goal.angle_tolerance))
+  {
+    throw nav2_core::ControllerException(
+            "Goal checker " + current_goal_checker_ + " does not take the goal tolerances (" +
+            std::to_string(goal.dist_tolerance) + " m, " + std::to_string(goal.angle_tolerance) +
+            " rad)", Action::Result::INVALID_CONTROLLER);
+  }
+  RCLCPP_DEBUG(
+    get_logger(), "Goal tolerances %.3f m, %.3f rad for goal checker %s",
+    goal.dist_tolerance, goal.angle_tolerance, current_goal_checker_.c_str());
 }
 
 void ControllerServer::setPlannerPath(const nav_msgs::msg::Path & path)
@@ -866,6 +885,7 @@ void ControllerServer::updateGlobalPath()
       return;
     }
     setPlannerPath(goal->path);
+    applyGoalTolerances(*goal);
   }
 }
 

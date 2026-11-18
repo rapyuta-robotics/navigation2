@@ -4,6 +4,9 @@ geometry_msgs/PoseStamped start
 geometry_msgs/PoseStamped[] viapoints
 string planner_id
 bool use_start # If false, use current robot pose as path start, if true, use start above instead
+# If true, the planner uses tolerance for this request instead of its configured one
+bool tolerance_from_action
+float32 tolerance  # [m]; a negative or non-finite value ends the request with UNKNOWN
 ---
 #result definition
 
@@ -25,11 +28,7 @@ uint16 GOAL_OCCUPIED=206
 uint16 TIMEOUT=207
 uint16 NO_VALID_PATH=208
 # uint16 NO_VIAPOINTS_GIVEN=209  # Reserved, only used by ComputePathThroughPoses (309)
-# Codes thrown by RR planners
-uint16 INVALID_START=210
-uint16 INVALID_GOAL=211
-uint16 NOT_INITIALIZED=212
-uint16 INTERNAL_ERROR=213
+uint16 CUSTOM_ERRORS=10200
 
 nav_msgs/Path path
 builtin_interfaces/Duration planning_time

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "gtest/gtest.h"
+#include "nav2_core/global_planner.hpp"
 #include "nav2_core/planner_exceptions.hpp"
 
 using nav2_core::ComputePathThroughPosesResult;
@@ -40,4 +41,38 @@ TEST(PlannerExceptionsTest, DefaultCodes)
   EXPECT_EQ(
     nav2_core::NoViapointsGiven("").errorCode(),
     ComputePathThroughPosesResult::NO_VIAPOINTS_GIVEN);
+}
+
+// A planner without a goal tolerance per request
+class PlannerWithoutRequestTolerance : public nav2_core::GlobalPlanner
+{
+public:
+  void configure(
+    const nav2::LifecycleNode::WeakPtr &, std::string, std::shared_ptr<tf2_ros::Buffer>,
+    std::shared_ptr<nav2_costmap_2d::Costmap2DROS>) override {}
+  void cleanup() override {}
+  void activate() override {}
+  void deactivate() override {}
+  nav_msgs::msg::Path createPlan(
+    const geometry_msgs::msg::PoseStamped &, const geometry_msgs::msg::PoseStamped &,
+    const std::vector<geometry_msgs::msg::PoseStamped> &, std::function<bool()>) override
+  {
+    return nav_msgs::msg::Path();
+  }
+};
+
+TEST(PlannerExceptionsTest, RequestToleranceUnsupportedByDefault)
+{
+  PlannerWithoutRequestTolerance derived;
+  // called through the interface, as planner_server does
+  nav2_core::GlobalPlanner & planner = derived;
+  const geometry_msgs::msg::PoseStamped pose;
+  const std::vector<geometry_msgs::msg::PoseStamped> viapoints;
+  try {
+    planner.createPlan(pose, pose, viapoints, [] {return false;}, 0.3);
+    FAIL() << "no exception thrown";
+  } catch (const nav2_core::InvalidPlanner & e) {
+    EXPECT_EQ(e.errorCode(), ComputePathThroughPosesResult::INVALID_PLANNER);
+  }
+  EXPECT_NO_THROW(planner.createPlan(pose, pose, viapoints, [] {return false;}));
 }

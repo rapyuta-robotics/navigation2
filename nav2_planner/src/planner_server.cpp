@@ -545,7 +545,16 @@ PlannerServer::computePlan()
         return action_server_pose_->is_cancel_requested();
       };
 
-    result->path = getPlan(start, goal_pose, goal->viapoints, goal->planner_id, cancel_checker);
+    std::optional<double> tolerance;
+    if (goal->tolerance_from_action) {
+      if (!std::isfinite(goal->tolerance) || goal->tolerance < 0.0) {
+        throw nav2_core::PlannerException(
+                "Invalid goal tolerance " + std::to_string(goal->tolerance));
+      }
+      tolerance = goal->tolerance;
+    }
+    result->path = getPlan(
+      start, goal_pose, goal->viapoints, goal->planner_id, cancel_checker, tolerance);
 
     if (!validatePath<ActionThroughPoses>(goal_pose, result->path, goal->planner_id)) {
       throw nav2_core::NoValidPathCouldBeFound(goal->planner_id + " generated a empty path");
@@ -590,23 +599,28 @@ PlannerServer::getPlan(
   const geometry_msgs::msg::PoseStamped & goal,
   const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
   const std::string & planner_id,
-  std::function<bool()> cancel_checker)
+  std::function<bool()> cancel_checker,
+  std::optional<double> tolerance)
 {
   RCLCPP_DEBUG(
     get_logger(), "Attempting to a find path from (%.2f, %.2f) to "
     "(%.2f, %.2f).", start.pose.position.x, start.pose.position.y,
     goal.pose.position.x, goal.pose.position.y);
 
+  const auto plan = [&](nav2_core::GlobalPlanner & planner) {
+      return tolerance ?
+             planner.createPlan(start, goal, viapoints, cancel_checker, *tolerance) :
+             planner.createPlan(start, goal, viapoints, cancel_checker);
+    };
   if (planners_.find(planner_id) != planners_.end()) {
-    return planners_[planner_id]->createPlan(start, goal, viapoints, cancel_checker);
+    return plan(*planners_[planner_id]);
   } else {
     if (planners_.size() == 1 && planner_id.empty()) {
       RCLCPP_WARN_ONCE(
         get_logger(), "No planners specified in action call. "
         "Server will use only plugin %s in server."
         " This warning will appear once.", planner_ids_concat_.c_str());
-      return planners_[planners_.begin()->first]->createPlan(start, goal, viapoints,
-        cancel_checker);
+      return plan(*planners_[planners_.begin()->first]);
     } else {
       RCLCPP_ERROR(
         get_logger(), "planner %s is not a valid planner. "

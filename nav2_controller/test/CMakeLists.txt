@@ -5,4 +5,6 @@ target_link_libraries(test_controller_server
   ${library_name}
   nav2_util::nav2_util_core
   rclcpp::rclcpp
+  position_goal_checker
+  simple_goal_checker
 )

@@ -18,6 +18,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "nav2_core/planner_exceptions.hpp"
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_ros_common/tf2_factories.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -80,6 +81,27 @@ public:
     const geometry_msgs::msg::PoseStamped & goal,
     const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
     std::function<bool()> cancel_checker) = 0;
+
+  /**
+   * @brief Method to create the plan with a goal tolerance given for this request instead of the configured one.
+   * The default throws InvalidPlanner; planners that support it override this method.
+   * @param start The starting pose of the robot
+   * @param goal  The goal pose of the robot
+   * @param viapoints The intermediate viapoints for the robot
+   * @param cancel_checker Function to check if the action has been canceled
+   * @param tolerance Goal tolerance [m], finite and >= 0
+   * @return      The sequence of poses to get from start to goal, if any
+   * @throw nav2_core::InvalidPlanner if the planner does not support a goal tolerance per request
+   */
+  virtual nav_msgs::msg::Path createPlan(
+    const geometry_msgs::msg::PoseStamped & /*start*/,
+    const geometry_msgs::msg::PoseStamped & /*goal*/,
+    const std::vector<geometry_msgs::msg::PoseStamped> & /*viapoints*/,
+    std::function<bool()>/*cancel_checker*/,
+    double /*tolerance*/)
+  {
+    throw nav2_core::InvalidPlanner("This planner does not support a goal tolerance per request");
+  }
 };
 
 }  // namespace nav2_core

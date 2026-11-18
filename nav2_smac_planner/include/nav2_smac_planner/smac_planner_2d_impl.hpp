@@ -210,6 +210,28 @@ nav_msgs::msg::Path SmacPlanner2DT<NodeT>::createPlan(
   const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
   std::function<bool()> cancel_checker)
 {
+  return computePlan(start, goal, viapoints, cancel_checker, std::nullopt);
+}
+
+template<typename NodeT>
+nav_msgs::msg::Path SmacPlanner2DT<NodeT>::createPlan(
+  const geometry_msgs::msg::PoseStamped & start,
+  const geometry_msgs::msg::PoseStamped & goal,
+  const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
+  std::function<bool()> cancel_checker,
+  double tolerance)
+{
+  return computePlan(start, goal, viapoints, cancel_checker, static_cast<float>(tolerance));
+}
+
+template<typename NodeT>
+nav_msgs::msg::Path SmacPlanner2DT<NodeT>::computePlan(
+  const geometry_msgs::msg::PoseStamped & start,
+  const geometry_msgs::msg::PoseStamped & goal,
+  const std::vector<geometry_msgs::msg::PoseStamped> & viapoints,
+  std::function<bool()> cancel_checker,
+  std::optional<float> tolerance)
+{
   if (!viapoints.empty()) {
     RCLCPP_WARN(_logger, "Received %zu viapoints, but this planner ignores them",
       viapoints.size());
@@ -295,7 +317,8 @@ nav_msgs::msg::Path SmacPlanner2DT<NodeT>::createPlan(
   // Note: All exceptions thrown are handled by the planner server and returned to the action
   if (!_a_star->createPath(
       path, num_iterations,
-      _tolerance / static_cast<float>(costmap->getResolution()), cancel_checker))
+      tolerance.value_or(_tolerance) / static_cast<float>(costmap->getResolution()),
+      cancel_checker))
   {
     // Note: If the start is blocked only one iteration will occur before failure
     if (num_iterations == 1) {
