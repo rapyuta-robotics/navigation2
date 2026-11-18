@@ -33,9 +33,11 @@
 #include <string>
 #include <vector>
 
-// Boost.Geometry's buffer code trips -Wnull-dereference inside its own headers (false positive)
+// Boost.Geometry's buffer code trips -Wnull-dereference and, in optimized builds,
+// -Wmaybe-uninitialized inside its own headers (false positives)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnull-dereference"
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include "boost/geometry.hpp"
 #include "boost/geometry/geometries/point_xy.hpp"
 #include "boost/geometry/geometries/polygon.hpp"
