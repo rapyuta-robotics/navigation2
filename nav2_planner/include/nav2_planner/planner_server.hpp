@@ -71,7 +71,8 @@ public:
    * @param goal goal request
    * @param planner_id The planner to plan with
    * @param cancel_checker A function to check if the action has been canceled
-   * @param tolerance Goal tolerance for this request; the planner's configured one if empty
+   * @param tolerance Goal tolerance [m] for this request, finite and >= 0 (computePlan ends a
+   * request with an invalid one with UNKNOWN); the planner's configured one if empty
    * @return Path
    */
   nav_msgs::msg::Path getPlan(
@@ -202,7 +203,8 @@ protected:
 
   /**
    * @brief The action server callback which calls planner to get the path
-   * ComputePathToPose
+   * ComputePathToPose. A goal with tolerance_from_action and a negative or non-finite
+   * tolerance ends with UNKNOWN.
    */
   void computePlan();
 
