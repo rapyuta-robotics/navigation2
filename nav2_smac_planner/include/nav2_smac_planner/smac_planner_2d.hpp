@@ -103,6 +103,7 @@ public:
    * @brief Creating a plan from start and goal poses with the goal tolerance of this request
    * @param start Start pose
    * @param goal Goal pose
+   * @param viapoints Intermediate viapoints, ignored by this planner
    * @param cancel_checker Function to check if the action has been canceled
    * @param tolerance Goal tolerance [m], used instead of the tolerance parameter for this plan
    * @return nav2_msgs::Path of the generated path
@@ -116,7 +117,13 @@ public:
 
 protected:
   /**
-   * @brief Plans with the goal tolerance @p tolerance, or the tolerance parameter if empty
+   * @brief Plans from start to goal with the given goal tolerance
+   * @param start Start pose
+   * @param goal Goal pose
+   * @param viapoints Intermediate viapoints, ignored by this planner
+   * @param cancel_checker Function to check if the action has been canceled
+   * @param tolerance Goal tolerance [m]; the tolerance parameter if empty
+   * @return nav2_msgs::Path of the generated path
    */
   nav_msgs::msg::Path computePlan(
     const geometry_msgs::msg::PoseStamped & start,
