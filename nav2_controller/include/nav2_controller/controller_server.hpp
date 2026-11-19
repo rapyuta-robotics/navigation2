@@ -303,6 +303,8 @@ protected:
 
   // Last time the controller generated a valid command
   rclcpp::Time last_valid_cmd_time_;
+  /// Consecutive control cycles whose velocity command failed with a retryable exception
+  int failed_cycles_{0};
 
   // Current path container
   nav_msgs::msg::Path current_path_;
