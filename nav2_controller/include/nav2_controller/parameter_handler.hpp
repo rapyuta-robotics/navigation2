@@ -39,6 +39,10 @@ struct Parameters
   double min_theta_velocity_threshold;
   std::string speed_limit_topic;
   double failure_tolerance;
+  /// Whether every ControllerException but InvalidController is retried, not only NoValidControl
+  bool retry_all_failures;
+  /// Consecutive failed control cycles allowed before the goal fails (-1 = unlimited)
+  int max_retries;
   bool use_realtime_priority;
   bool publish_zero_velocity;
   rclcpp::Duration costmap_update_timeout{0, 0};

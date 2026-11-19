@@ -543,6 +543,7 @@ void ControllerServer::computeControl()
     }
 
     last_valid_cmd_time_ = now();
+    failed_cycles_ = 0;
     nav2::Rate loop_rate(this, params_->controller_frequency);
     while (rclcpp::ok()) {
       auto start_time = this->now();
@@ -732,29 +733,38 @@ void ControllerServer::computeAndPublishVelocity()
       transformed_global_plan_,
       goal);
     last_valid_cmd_time_ = now();
+    failed_cycles_ = 0;
     cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();
     cmd_vel_2d.header.stamp = last_valid_cmd_time_;
-    // Only no valid control exception types are valid to attempt to have control patience, as
-    // other types will not be resolved with more attempts
-  } catch (nav2_core::NoValidControl & e) {
-    if (params_->failure_tolerance > 0 || params_->failure_tolerance == -1.0) {
-      RCLCPP_WARN(this->get_logger(), "%s", e.what());
-      cmd_vel_2d.twist.angular.x = 0;
-      cmd_vel_2d.twist.angular.y = 0;
-      cmd_vel_2d.twist.angular.z = 0;
-      cmd_vel_2d.twist.linear.x = 0;
-      cmd_vel_2d.twist.linear.y = 0;
-      cmd_vel_2d.twist.linear.z = 0;
-      cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();
-      cmd_vel_2d.header.stamp = now();
-      if ((now() - last_valid_cmd_time_).seconds() > params_->failure_tolerance &&
-        params_->failure_tolerance != -1.0)
-      {
-        throw nav2_core::PatienceExceeded("Controller patience exceeded");
-      }
-    } else {
+  } catch (const nav2_core::ControllerException & e) {
+    // By default only no valid control exception types are valid to attempt to have control
+    // patience, as other types will not be resolved with more attempts. retry_all_failures
+    // extends it to every controller failure but an invalid controller.
+    const bool retryable = params_->retry_all_failures ?
+      dynamic_cast<const nav2_core::InvalidController *>(&e) == nullptr :
+      dynamic_cast<const nav2_core::NoValidControl *>(&e) != nullptr;
+    if (!retryable) {
       throw;
     }
+    // The original exception is rethrown so that the client gets the controller's error code
+    ++failed_cycles_;
+    if (params_->max_retries >= 0 && failed_cycles_ > params_->max_retries) {
+      throw;
+    }
+    if (params_->failure_tolerance <= 0.0 && params_->failure_tolerance != -1.0) {
+      throw;
+    }
+    if ((now() - last_valid_cmd_time_).seconds() > params_->failure_tolerance &&
+      params_->failure_tolerance != -1.0)
+    {
+      throw nav2_core::PatienceExceeded("Controller patience exceeded");
+    }
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 1000, "Controller failed (%d consecutive failures): %s",
+      failed_cycles_, e.what());
+    cmd_vel_2d.twist = geometry_msgs::msg::Twist();
+    cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();
+    cmd_vel_2d.header.stamp = now();
   }
 
   RCLCPP_DEBUG(get_logger(), "Publishing velocity at time %.2f", now().seconds());
