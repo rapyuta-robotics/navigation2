@@ -544,6 +544,7 @@ void ControllerServer::computeControl()
 
     last_valid_cmd_time_ = now();
     failed_cycles_ = 0;
+    stopping_controller_.clear();
     nav2::Rate loop_rate(this, params_->controller_frequency);
     while (rclcpp::ok()) {
       auto start_time = this->now();
@@ -553,8 +554,12 @@ void ControllerServer::computeControl()
         return;
       }
 
-      if (action_server_->is_cancel_requested()) {
-        if (controllers_[current_controller_]->cancel()) {
+      const bool cancel_requested = action_server_->is_cancel_requested();
+      if (cancel_requested) {
+        // During a controller switch the robot still follows the stopping controller
+        const std::string & controller =
+          stopping_controller_.empty() ? current_controller_ : stopping_controller_;
+        if (controllers_[controller]->cancel()) {
           RCLCPP_INFO(get_logger(), "Cancellation was successful. Stopping the robot.");
           action_server_->terminate_all();
           onGoalExit(true);
@@ -573,12 +578,24 @@ void ControllerServer::computeControl()
       // Refresh the transformed plan and goal together so they share a single map->odom snapshot
       transformedPlanAndGoal();
 
-      if (isGoalReached()) {
-        RCLCPP_INFO(get_logger(), "Reached the goal!");
-        break;
-      }
+      // The cancel() of the stopping controller was already polled this cycle on a cancel request
+      if (!stopping_controller_.empty() &&
+        (cancel_requested || !controllers_[stopping_controller_]->cancel()))
+      {
+        // The previous controller is bringing the robot to a stop: no goal check meanwhile
+        computeAndPublishVelocity(stopping_controller_);
+      } else {
+        if (!stopping_controller_.empty()) {
+          finishControllerSwitch();
+        }
 
-      computeAndPublishVelocity();
+        if (isGoalReached()) {
+          RCLCPP_INFO(get_logger(), "Reached the goal!");
+          break;
+        }
+
+        computeAndPublishVelocity(current_controller_);
+      }
 
       auto cycle_duration = this->now() - start_time;
       if (!loop_rate.sleep()) {
@@ -703,7 +720,7 @@ void ControllerServer::transformedPlanAndGoal()
   }
 }
 
-void ControllerServer::computeAndPublishVelocity()
+void ControllerServer::computeAndPublishVelocity(const std::string & controller_id)
 {
   geometry_msgs::msg::PoseStamped pose;
 
@@ -726,7 +743,7 @@ void ControllerServer::computeAndPublishVelocity()
 
   try {
     cmd_vel_2d =
-      controllers_[current_controller_]->computeVelocityCommands(
+      controllers_[controller_id]->computeVelocityCommands(
       pose,
       twist,
       goal_checkers_[current_goal_checker_].get(),
@@ -839,6 +856,16 @@ void ControllerServer::updateGlobalPath()
     auto goal = action_server_->accept_pending_goal();
     std::string current_controller;
     if (findControllerId(goal->controller_id, current_controller)) {
+      if (params_->stop_on_controller_switch && stopping_controller_.empty() &&
+        current_controller != current_controller_)
+      {
+        // The running controller brings the robot to a stop before the new one takes over. As the
+        // path handler is shared, it does so following the new goal's plan, with its goal checker.
+        RCLCPP_INFO(
+          get_logger(), "Switching from controller %s to %s once the robot is stopped",
+          current_controller_.c_str(), current_controller.c_str());
+        stopping_controller_ = current_controller_;
+      }
       current_controller_ = current_controller;
     } else {
       std::shared_ptr<Action::Result> result = std::make_shared<Action::Result>();
@@ -897,6 +924,20 @@ void ControllerServer::updateGlobalPath()
     setPlannerPath(goal->path);
     applyGoalTolerances(*goal);
   }
+}
+
+void ControllerServer::finishControllerSwitch()
+{
+  RCLCPP_INFO(
+    get_logger(), "Controller %s stopped, continuing with %s", stopping_controller_.c_str(),
+    current_controller_.c_str());
+  publishZeroVelocity();
+  controllers_[stopping_controller_]->reset();
+  if (stopping_controller_ == current_controller_) {
+    // The goal switched back to the stopping controller: hand it the plan again after its reset
+    controllers_[current_controller_]->newPathReceived(current_path_);
+  }
+  stopping_controller_.clear();
 }
 
 void ControllerServer::publishVelocity(const geometry_msgs::msg::TwistStamped & velocity)
