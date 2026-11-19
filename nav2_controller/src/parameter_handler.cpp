@@ -42,6 +42,10 @@ ParameterHandler::ParameterHandler(
   params_.speed_limit_topic = node->declare_or_get_parameter("speed_limit_topic",
     std::string("speed_limit"));
   params_.failure_tolerance = node->declare_or_get_parameter("failure_tolerance", 0.0);
+  params_.retry_all_failures = node->declare_or_get_parameter("retry_all_failures", false);
+  params_.max_retries = node->declare_or_get_parameter("max_retries", -1);
+  params_.stop_on_controller_switch =
+    node->declare_or_get_parameter("stop_on_controller_switch", false);
   params_.use_realtime_priority = node->declare_or_get_parameter("use_realtime_priority", false);
   params_.publish_zero_velocity = node->declare_or_get_parameter("publish_zero_velocity", true);
   double costmap_update_timeout_dbl = node->declare_or_get_parameter("costmap_update_timeout",
@@ -171,6 +175,15 @@ rcl_interfaces::msg::SetParametersResult ParameterHandler::validateParameterUpda
         result.successful = false;
       }
     }
+    if (param_type == ParameterType::PARAMETER_INTEGER) {
+      if (param_name == "max_retries" && parameter.as_int() < -1) {
+        RCLCPP_WARN(
+        logger_, "The value of parameter '%s' is incorrectly set to %ld, "
+        "it should be >=-1. Ignoring parameter update.",
+        param_name.c_str(), parameter.as_int());
+        result.successful = false;
+      }
+    }
   }
   return result;
 }
@@ -207,6 +220,16 @@ ParameterHandler::updateParametersCallback(
         params_.failure_tolerance = parameter.as_double();
       } else if (param_name == "search_window") {
         params_.search_window = parameter.as_double();
+      }
+    } else if (param_type == ParameterType::PARAMETER_INTEGER) {
+      if (param_name == "max_retries") {
+        params_.max_retries = static_cast<int>(parameter.as_int());
+      }
+    } else if (param_type == ParameterType::PARAMETER_BOOL) {
+      if (param_name == "retry_all_failures") {
+        params_.retry_all_failures = parameter.as_bool();
+      } else if (param_name == "stop_on_controller_switch") {
+        params_.stop_on_controller_switch = parameter.as_bool();
       }
     }
     mutex_.unlock();
