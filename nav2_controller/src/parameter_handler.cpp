@@ -49,6 +49,8 @@ ParameterHandler::ParameterHandler(
       "The value of parameter 'max_retries' is incorrectly set to " +
       std::to_string(params_.max_retries) + ", it should be >=-1.");
   }
+  params_.stop_on_controller_switch =
+    node->declare_or_get_parameter("stop_on_controller_switch", false);
   params_.use_realtime_priority = node->declare_or_get_parameter("use_realtime_priority", false);
   params_.publish_zero_velocity = node->declare_or_get_parameter("publish_zero_velocity", true);
   double costmap_update_timeout_dbl = node->declare_or_get_parameter("costmap_update_timeout",
@@ -231,6 +233,8 @@ ParameterHandler::updateParametersCallback(
     } else if (param_type == ParameterType::PARAMETER_BOOL) {
       if (param_name == "retry_all_failures") {
         params_.retry_all_failures = parameter.as_bool();
+      } else if (param_name == "stop_on_controller_switch") {
+        params_.stop_on_controller_switch = parameter.as_bool();
       }
     }
     mutex_.unlock();

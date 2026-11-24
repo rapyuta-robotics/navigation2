@@ -193,9 +193,15 @@ protected:
    */
   void transformedPlanAndGoal();
   /**
-   * @brief Calculates velocity and publishes to "cmd_vel" topic
+   * @brief Calculates velocity with the given controller and publishes to "cmd_vel" topic
+   * @param controller_id Controller computing the velocity
    */
-  void computeAndPublishVelocity();
+  void computeAndPublishVelocity(const std::string & controller_id);
+  /**
+   * @brief Stops the robot, resets the controller that was stopping and hands control to the
+   * current controller
+   */
+  void finishControllerSwitch();
   /**
    * @brief Calls setPlannerPath method with an updated path received from
    * action server
@@ -291,6 +297,8 @@ protected:
   pluginlib::ClassLoader<nav2_core::Controller> lp_loader_;
   ControllerMap controllers_;
   std::string controller_ids_concat_, current_controller_;
+  /// Controller of a preempted goal still stopping the robot before current_controller_ takes over
+  std::string stopping_controller_;
 
   // Path Handler Plugins
   pluginlib::ClassLoader<nav2_core::PathHandler> path_handler_loader_;

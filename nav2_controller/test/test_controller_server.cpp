@@ -124,6 +124,22 @@ public:
     reach_goal_ = reach_goal;
   }
 
+  /// Results of the next cancel() calls, after which cancel() returns cancel_result
+  void scriptCancel(std::vector<bool> results)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    cancel_results_.assign(results.begin(), results.end());
+  }
+
+  /// Steps replacing the script at the next cancel() call, as script() does
+  void scriptOnCancel(std::vector<std::exception_ptr> steps, bool reach_goal)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    on_cancel_steps_ = std::move(steps);
+    on_cancel_reach_goal_ = reach_goal;
+    has_on_cancel_script_ = true;
+  }
+
   void configure(
     const nav2::LifecycleNode::WeakPtr &, std::string, nav2::TransformBuffer::SharedPtr,
     std::shared_ptr<nav2_costmap_2d::Costmap2DROS>) override {}
@@ -163,7 +179,18 @@ public:
   bool cancel() override
   {
     log_->add(name_ + ".cancel");
-    return cancel_result;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (has_on_cancel_script_) {
+      steps_.assign(on_cancel_steps_.begin(), on_cancel_steps_.end());
+      reach_goal_ = on_cancel_reach_goal_;
+      has_on_cancel_script_ = false;
+    }
+    if (cancel_results_.empty()) {
+      return cancel_result;
+    }
+    const bool result = cancel_results_.front();
+    cancel_results_.pop_front();
+    return result;
   }
 
   void reset() override {log_->add(name_ + ".reset");}
@@ -178,14 +205,19 @@ private:
   std::mutex mutex_;
   std::deque<std::exception_ptr> steps_;
   bool reach_goal_{true};
+  std::deque<bool> cancel_results_;
+  std::vector<std::exception_ptr> on_cancel_steps_;
+  bool on_cancel_reach_goal_{false};
+  bool has_on_cancel_script_{false};
 };
 
-/// Goal checker reporting the flag set by the scripted controllers, cleared on every new path
+/// Goal checker reporting the flag set by the scripted controllers, cleared on every new path;
+/// logs "goal.check" on every check
 class FlagGoalChecker : public nav2_core::GoalChecker
 {
 public:
-  explicit FlagGoalChecker(std::shared_ptr<std::atomic<bool>> goal_reached)
-  : goal_reached_(goal_reached) {}
+  FlagGoalChecker(std::shared_ptr<std::atomic<bool>> goal_reached, std::shared_ptr<EventLog> log)
+  : goal_reached_(goal_reached), log_(log) {}
 
   void initialize(
     const nav2::LifecycleNode::WeakPtr &, const std::string &,
@@ -195,6 +227,7 @@ public:
     const geometry_msgs::msg::Pose &, const geometry_msgs::msg::Pose &,
     const geometry_msgs::msg::Twist &, const nav_msgs::msg::Path &) override
   {
+    log_->add("goal.check");
     return *goal_reached_;
   }
   bool isGoalXYReached(
@@ -210,6 +243,7 @@ public:
 
 private:
   std::shared_ptr<std::atomic<bool>> goal_reached_;
+  std::shared_ptr<EventLog> log_;
 };
 
 /// Path handler handing the whole plan to the controller untransformed
@@ -260,7 +294,7 @@ std::exception_ptr blocked()
 }
 
 /**
- * @brief Active controller server with scripted controllers "A" and "B", driven through its
+ * @brief Active controller server with scripted controllers "A", "B" and "C", driven through its
  * FollowPath action by a client node; each test runs in its own namespace
  */
 class FollowPathTest : public ::testing::Test
@@ -298,8 +332,8 @@ protected:
     tf_msg.transform.rotation.w = 1.0;
     server_->getTfBuffer().setTransform(tf_msg, "test", true);
     server_->addPlugins(
-      {{"A", controller_a_}, {"B", controller_b_}},
-      std::make_shared<FlagGoalChecker>(goal_reached_),
+      {{"A", controller_a_}, {"B", controller_b_}, {"C", controller_c_}},
+      std::make_shared<FlagGoalChecker>(goal_reached_, log_),
       std::make_shared<PassThroughPathHandler>());
     ASSERT_EQ(server_->activate().id(), lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE);
 
@@ -373,6 +407,8 @@ protected:
     std::make_shared<ScriptedController>("A", log_, goal_reached_);
   std::shared_ptr<ScriptedController> controller_b_ =
     std::make_shared<ScriptedController>("B", log_, goal_reached_);
+  std::shared_ptr<ScriptedController> controller_c_ =
+    std::make_shared<ScriptedController>("C", log_, goal_reached_);
   std::shared_ptr<ControllerServerShim> server_;
   rclcpp::Node::SharedPtr client_node_;
   rclcpp_action::Client<Action>::SharedPtr client_;
@@ -546,6 +582,221 @@ TEST_F(FollowPathTest, ControllerChangeResetsFailureCount)
   EXPECT_EQ(log_->count("B.compute"), 31);
 }
 
+/// Events logged after the first occurrence of an event, at most count of them
+std::vector<std::string> eventsAfter(
+  const std::vector<std::string> & events, const std::string & event, size_t count)
+{
+  auto it = std::find(events.begin(), events.end(), event);
+  if (it == events.end()) {
+    return {};
+  }
+  ++it;
+  const auto last = it + std::min<std::ptrdiff_t>(std::distance(it, events.end()), count);
+  return {it, last};
+}
+
+TEST_F(FollowPathTest, ControllerSwitchLetsPreviousControllerStop)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  controller_a_->script({}, false);
+  controller_a_->scriptCancel({false, false});
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+
+  const auto result = followPath("B");
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  // A keeps driving until its cancel() succeeds, then it is reset and B takes over
+  const std::vector<std::string> expected{
+    "A.cancel", "A.compute", "A.cancel", "A.compute", "A.cancel", "A.reset", "goal.check",
+    "B.compute"};
+  EXPECT_EQ(eventsAfter(log_->events(), "B.path", expected.size()), expected);
+}
+
+TEST_F(FollowPathTest, ControllerSwitchIsImmediateByDefault)
+{
+  startServer({});
+
+  controller_a_->script({}, false);
+  controller_a_->cancel_result = false;
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+
+  const auto result = followPath("B");
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  EXPECT_EQ(
+    eventsAfter(log_->events(), "B.path", 2),
+    (std::vector<std::string>{"goal.check", "B.compute"}));
+  EXPECT_EQ(log_->count("A.cancel"), 0);
+}
+
+TEST_F(FollowPathTest, CancelDuringControllerSwitchWaitsForPreviousController)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  controller_a_->script({}, false);
+  controller_a_->cancel_result = false;
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+  const auto goal_b = sendGoal("B");
+  ASSERT_NE(goal_b, nullptr);
+  ASSERT_TRUE(waitFor("A.cancel", 2));
+
+  auto cancel_future = client_->async_cancel_goal(goal_b);
+  ASSERT_EQ(
+    rclcpp::spin_until_future_complete(client_node_, cancel_future, std::chrono::seconds(10)),
+    rclcpp::FutureReturnCode::SUCCESS);
+  // While A refuses to stop, the goal stays active and A keeps driving
+  const int64_t computed = log_->count("A.compute");
+  ASSERT_TRUE(waitFor("A.cancel", log_->count("A.cancel") + 10));
+  EXPECT_GE(log_->count("A.compute"), computed + 9);
+  auto result_future = client_->async_get_result(goal_b);
+  EXPECT_EQ(
+    rclcpp::spin_until_future_complete(
+      client_node_, result_future, std::chrono::milliseconds(200)),
+    rclcpp::FutureReturnCode::TIMEOUT);
+
+  controller_a_->cancel_result = true;
+  ASSERT_EQ(
+    rclcpp::spin_until_future_complete(client_node_, result_future, std::chrono::seconds(10)),
+    rclcpp::FutureReturnCode::SUCCESS);
+  EXPECT_EQ(result_future.get().code, ResultCode::CANCELED);
+  EXPECT_EQ(log_->count("B.compute"), 0);
+}
+
+TEST_F(FollowPathTest, ControllerSwitchSkipsGoalCheckWhileStopping)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  // While stopping, A reports the goal reached
+  controller_a_->script({}, false);
+  controller_a_->scriptCancel({false, false});
+  controller_a_->scriptOnCancel({}, true);
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+
+  const auto result = followPath("B");
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  // The goal is checked only once A is stopped
+  const std::vector<std::string> expected{
+    "A.cancel", "A.compute", "A.cancel", "A.compute", "A.cancel", "A.reset", "goal.check"};
+  EXPECT_EQ(eventsAfter(log_->events(), "B.path", expected.size()), expected);
+  EXPECT_EQ(log_->count("B.compute"), 0);
+}
+
+TEST_F(FollowPathTest, StoppingControllerFailureSwitchesController)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  controller_a_->script({}, false);
+  controller_a_->scriptCancel({false});
+  controller_a_->scriptOnCancel({blocked()}, false);
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+
+  const auto result = followPath("B");
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  const std::vector<std::string> expected{
+    "A.cancel", "A.compute", "A.reset", "goal.check", "B.compute"};
+  EXPECT_EQ(eventsAfter(log_->events(), "B.path", expected.size()), expected);
+}
+
+TEST_F(FollowPathTest, StoppingControllerErrorSwitchesController)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  controller_a_->script({}, false);
+  controller_a_->scriptCancel({false});
+  controller_a_->scriptOnCancel({fail<std::runtime_error>("plugin bug")}, false);
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+
+  const auto result = followPath("B");
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  const std::vector<std::string> expected{
+    "A.cancel", "A.compute", "A.reset", "goal.check", "B.compute"};
+  EXPECT_EQ(eventsAfter(log_->events(), "B.path", expected.size()), expected);
+}
+
+TEST_F(FollowPathTest, ControllerSwitchResetsFailureCountOfStoppingController)
+{
+  // 20 Hz leaves A 15 cycles (0.75 s) of retries to receive the preemption
+  startServer({
+    rclcpp::Parameter("stop_on_controller_switch", true),
+    rclcpp::Parameter("controller_frequency", 20.0),
+    rclcpp::Parameter("retry_all_failures", true),
+    rclcpp::Parameter("max_retries", 50),
+    rclcpp::Parameter("failure_tolerance", -1.0)});
+
+  // A fails 30 times while stopping
+  controller_a_->script(std::vector<std::exception_ptr>(1000, blocked()));
+  controller_a_->scriptCancel(std::vector<bool>(30, false));
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 35));
+
+  // B gets its own max_retries, whatever A failed before
+  controller_b_->script(std::vector<std::exception_ptr>(30, blocked()));
+  const auto result = followPath("B");
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  EXPECT_LE(countBefore(log_->events(), "A.compute", "B.path"), 50);
+  EXPECT_EQ(log_->count("A.cancel"), 31);
+  EXPECT_EQ(log_->count("B.compute"), 31);
+}
+
+TEST_F(FollowPathTest, ControllerSwitchPreemptedByThirdController)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  controller_a_->script({}, false);
+  controller_a_->cancel_result = false;
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+  ASSERT_NE(sendGoal("B"), nullptr);
+  ASSERT_TRUE(waitFor("A.cancel", 2));
+
+  const auto goal_c = sendGoal("C");
+  ASSERT_NE(goal_c, nullptr);
+  ASSERT_TRUE(waitFor("C.path", 1));
+  ASSERT_TRUE(waitFor("A.cancel", log_->count("A.cancel") + 2));
+  controller_a_->cancel_result = true;
+
+  EXPECT_EQ(result(goal_c).code, ResultCode::SUCCEEDED);
+  // A still stops after the second preemption, then C takes over
+  EXPECT_EQ(
+    eventsAfter(log_->events(), "C.path", 2), (std::vector<std::string>{"A.cancel", "A.compute"}));
+  EXPECT_EQ(
+    eventsAfter(log_->events(), "A.reset", 2),
+    (std::vector<std::string>{"goal.check", "C.compute"}));
+  EXPECT_EQ(log_->count("B.compute"), 0);
+}
+
+TEST_F(FollowPathTest, ControllerSwitchBackToStoppingController)
+{
+  startServer({rclcpp::Parameter("stop_on_controller_switch", true)});
+
+  controller_a_->script({}, false);
+  controller_a_->cancel_result = false;
+  ASSERT_NE(sendGoal("A"), nullptr);
+  ASSERT_TRUE(waitFor("A.compute", 3));
+  ASSERT_NE(sendGoal("B"), nullptr);
+  ASSERT_TRUE(waitFor("A.cancel", 2));
+
+  // A reports the goal reached while stopping, which is checked only once A is stopped
+  controller_a_->script({}, true);
+  const auto goal_a = sendGoal("A");
+  ASSERT_NE(goal_a, nullptr);
+  ASSERT_TRUE(waitFor("A.path", 2));
+  ASSERT_TRUE(waitFor("A.cancel", log_->count("A.cancel") + 2));
+  controller_a_->cancel_result = true;
+
+  EXPECT_EQ(result(goal_a).code, ResultCode::SUCCEEDED);
+  // A is reset once stopped and gets the plan again
+  EXPECT_EQ(
+    eventsAfter(log_->events(), "A.reset", 2),
+    (std::vector<std::string>{"A.path", "goal.check"}));
+  EXPECT_EQ(log_->count("B.compute"), 0);
+}
+
 TEST(ControllerServerTest, TransformedPlanAndGoalThrowsOnTfFailure)
 {
   rclcpp::NodeOptions options;
@@ -712,7 +963,8 @@ TEST(ControllerServerTest, test_dynamic_parameters)
       rclcpp::Parameter("failure_tolerance", 5.0),
       rclcpp::Parameter("search_window", 10.0),
       rclcpp::Parameter("retry_all_failures", true),
-      rclcpp::Parameter("max_retries", 3)});
+      rclcpp::Parameter("max_retries", 3),
+      rclcpp::Parameter("stop_on_controller_switch", true)});
 
   rclcpp::spin_until_future_complete(
     node->get_node_base_interface(),
@@ -725,6 +977,7 @@ TEST(ControllerServerTest, test_dynamic_parameters)
   EXPECT_EQ(params_->search_window, 10.0);
   EXPECT_TRUE(params_->retry_all_failures);
   EXPECT_EQ(params_->max_retries, 3);
+  EXPECT_TRUE(params_->stop_on_controller_switch);
 
   results = rec_param->set_parameters_atomically(
     {rclcpp::Parameter("min_x_velocity_threshold", -1.0)});

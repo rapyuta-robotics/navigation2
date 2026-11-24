@@ -45,6 +45,9 @@ struct Parameters
   /// Consecutive failed control cycles allowed before the goal fails (-1 = unlimited). Retries
   /// need failure_tolerance != 0 (0 = no retries, -1 = no time limit).
   int max_retries;
+  /// Whether a goal switching controllers lets the previous one stop the robot before switching.
+  /// The switch waits as long as the previous controller's cancel() returns false.
+  bool stop_on_controller_switch;
   bool use_realtime_priority;
   bool publish_zero_velocity;
   rclcpp::Duration costmap_update_timeout{0, 0};
